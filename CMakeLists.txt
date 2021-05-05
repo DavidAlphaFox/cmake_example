@@ -1,0 +1,107 @@
+CMAKE_MINIMUM_REQUIRED(VERSION 3.2)
+# 包含依赖
+INCLUDE(CheckLibraryExists)
+INCLUDE(CheckFunctionExists)
+
+PROJECT(hello LANGUAGES C CXX)
+# pkg-config查找相关包
+FIND_PACKAGE(PkgConfig REQUIRED)
+PKG_CHECK_MODULES(GLIB REQUIRED glib-2.0)
+PKG_CHECK_MODULES(LIBUV REQUIRED libuv)
+PKG_CHECK_MODULES(LIBSODIUM REQUIRED libsodium)
+PKG_CHECK_MODULES(LIBYAML REQUIRED yaml-0.1)
+
+CHECK_LIBRARY_EXISTS(rt clock_gettime "" HAVE_LIB_RT)
+
+IF(NOT HAVE_LIB_RT)
+   SET(CMAKE_EXTRA_INCLUDE_FILES time.h)
+   CHECK_FUNCTION_EXISTS(clock_gettime HAVE_CLOCK_GETTIME)
+   SET(CMAKE_EXTRA_INCLUDE_FILES)
+ENDIF()
+
+SET(CMAKE_SKIP_INSTALL_RULES TRUE)
+SET(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)  
+
+# C standard can be overridden when this is used as a sub-project.
+IF(NOT CMAKE_C_STANDARD)
+  # This project can use C11, but will gracefully decay down to C89.
+  SET(CMAKE_C_STANDARD 11)
+  SET(CMAKE_C_STANDARD_REQUIRED OFF)
+  SET(CMAKE_C_EXTENSIONS OFF)
+ENDIF(NOT CMAKE_C_STANDARD)
+
+# C++ standard can be overridden when this is used as a sub-project.
+IF(NOT CMAKE_CXX_STANDARD)
+  # This project requires C++11.
+  SET(CMAKE_CXX_STANDARD 11)
+  SET(CMAKE_CXX_STANDARD_REQUIRED ON)
+  SET(CMAKE_CXX_EXTENSIONS OFF)
+ENDIF(NOT CMAKE_CXX_STANDARD)
+
+FUNCTION(ReadVariables MKFile)
+  FILE(READ "${MKFile}" FileContents)
+  STRING(REPLACE "\\\n" "" FileContents ${FileContents})
+  STRING(REPLACE "\n" ";" FileLines ${FileContents})
+  LIST(REMOVE_ITEM FileLines "")
+  FOREACH(line ${FileLines})
+    STRING(REPLACE "?=" ";" line_split ${line})
+    LIST(LENGTH line_split count)
+    IF (count LESS 2)
+      MESSAGE(STATUS "Skipping ${line}")
+      CONTINUE()
+    ENDIF()
+    LIST(GET line_split -1 value)
+
+    STRING(STRIP ${value} value)
+    SEPARATE_ARGUMENTS(value)
+    LIST(REMOVE_AT line_split -1)
+    FOREACH(var_name ${line_split})
+      STRING(STRIP ${var_name} var_name)
+      MESSAGE(STATUS "Set ${var_name} with ${value}")
+      SET(${var_name} ${value} PARENT_SCOPE)
+    ENDFOREACH()
+  ENDFOREACH()
+ENDFUNCTION()
+
+ReadVariables(env.mk)
+
+FILE(GLOB SRC src/*.c)
+
+ADD_LIBRARY(hello SHARED ${SRC})
+
+TARGET_INCLUDE_DIRECTORIES(hello PRIVATE 
+  include/
+  ${LIBYAML_INCLUDE_DIRS}
+  ${LIBSODIUM_INCLUDE_DIRS}
+  ${LIBUV_INCLUDE_DIRS}
+  ${GLIB_INCLUDE_DIRS}
+  ${ERTS_INCLUDE_DIR}
+  ${ERL_INTERFACE_INCLUDE_DIR})
+
+TARGET_COMPILE_OPTIONS(hello PRIVATE 
+  $<$<COMPILE_LANGUAGE:C>:-I$<JOIN:$<TARGET_PROPERTY:hello,INCLUDE_DIRECTORIES>, -I>>
+  $<$<COMPILE_LANGUAGE:CXX>:-I$<JOIN:$<TARGET_PROPERTY:hello,INCLUDE_DIRECTORIES>, -I>>)
+
+TARGET_LINK_DIRECTORIES(hello PRIVATE
+  ${LIBYAML_LIBRARY_DIRS}
+  ${LIBSODIUM_LIBRARY_DIRS}
+  ${LIBUV_LIBRARY_DIRS}
+  ${GLIB_LIBRARY_DIRS} 
+  ${ERL_INTERFACE_LIB_DIR})
+IF(APPLE)
+  TARGET_LINK_OPTIONS(hello PRIVATE "-flat_namespace" "-undefined" "suppress")
+ENDIF() 
+
+TARGET_LINK_LIBRARIES(hello 
+  ei 
+  ${GLIB_LIBRARIES} 
+  ${LIBUV_LIBRARIES}
+  ${LIBSODIUM_LIBRARIES}
+  ${LIBYAML_LIBRARIES})
+
+IF(HAVE_LIB_RT)
+  TARGET_LINK_LIBRARIES(hello rt)
+ENDIF()
+
+
+
